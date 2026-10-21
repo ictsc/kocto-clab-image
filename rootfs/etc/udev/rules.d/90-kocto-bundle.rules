@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="KOCTO-BUNDLE", ENV{SYSTEMD_WANTS}+="kocto-bundle.service"

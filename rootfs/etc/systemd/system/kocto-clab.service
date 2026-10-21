@@ -1,0 +1,15 @@
+[Unit]
+Description=Deploy containerlab topology in /opt/kocto/lab
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 停止時にdestroyしないのは、ノードの中身を次の起動まで残すため。
+ExecStart=/opt/kocto/bin/kocto-clab up
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

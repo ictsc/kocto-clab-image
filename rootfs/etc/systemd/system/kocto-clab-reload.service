@@ -1,0 +1,10 @@
+[Unit]
+Description=Redeploy containerlab topology after it changed
+
+[Service]
+Type=oneshot
+# エディタの保存で続く変更を1回にまとめる。
+ExecStartPre=/usr/bin/sleep 2
+# kocto-clab.serviceのrestartは実行中のdeployを止めるため、本体を直接呼んでロックで待つ。
+ExecStart=/opt/kocto/bin/kocto-clab up
+TimeoutStartSec=30min

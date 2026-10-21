@@ -1,0 +1,10 @@
+[Unit]
+Description=Load containerlab bundle from the KOCTO-BUNDLE disk
+Requires=docker.service
+After=docker.service
+Before=kocto-clab.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/kocto/bin/kocto-bundle
+TimeoutStartSec=30min

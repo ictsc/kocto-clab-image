@@ -1,0 +1,48 @@
+#!/bin/bash
+# ラベルKOCTO-BUNDLEのディスクから、コンテナイメージとlabのファイルを取り込む。
+set -euo pipefail
+
+DEVICE=/dev/disk/by-label/KOCTO-BUNDLE
+MOUNT=/run/kocto-bundle
+LAB=/opt/kocto/lab
+# 同じbundleを二度適用しないのは、cloneや再起動のあとにVM内で変えたファイルを上書きしないため。
+APPLIED=/var/lib/kocto-bundle/applied-id
+
+# udevの通知より遅れてリンクが作られることがあるため、少し待つ。
+for _ in $(seq 1 30); do
+	[[ -e $DEVICE ]] && break
+	sleep 1
+done
+if [[ ! -e $DEVICE ]]; then
+	echo "Bundle disk not found: $DEVICE"
+	exit 0
+fi
+
+mkdir -p "$MOUNT"
+mount -o ro "$DEVICE" "$MOUNT"
+trap 'umount "$MOUNT"' EXIT
+
+id=$(cat "$MOUNT/bundle.id")
+if [[ -f $APPLIED && $(cat "$APPLIED") == "$id" ]]; then
+	echo "Bundle already applied, skipped: id=$id"
+	exit 0
+fi
+
+for archive in "$MOUNT"/images/*.tar; do
+	[[ -e $archive ]] || continue
+	echo "Loading image archive: ${archive##*/}"
+	docker load --input "$archive"
+done
+
+# トポロジーを置いた時点でdeployが始まるため、それ以外のファイルを先に置く。
+mkdir -p "$LAB"
+tar -C "$MOUNT/lab" --exclude=./topology.clab.yml -c . | tar -C "$LAB" --no-same-owner -x
+if [[ -f $MOUNT/lab/topology.clab.yml ]]; then
+	tmp=$(mktemp "$LAB/.topology.XXXXXX")
+	install -m 0644 "$MOUNT/lab/topology.clab.yml" "$tmp"
+	mv "$tmp" "$LAB/topology.clab.yml"
+fi
+
+mkdir -p "$(dirname "$APPLIED")"
+echo "$id" >"$APPLIED"
+echo "Applied bundle: id=$id"

@@ -1,0 +1,107 @@
+#!/bin/bash
+# /opt/kocto/lab/topology.clab.yml とcontainerlabのlabを一致させる。
+set -euo pipefail
+
+TOPOLOGY=/opt/kocto/lab/topology.clab.yml
+CLAB=/opt/bin/containerlab
+# 起動時と変更時のserviceは同時に動きうるため、実行中のdeployを止めないよう順に実行する。
+LOCK=/run/kocto-clab.lock
+# /runは起動ごとに空になるので、これがなければ起動してから最初のup。
+BOOT_MARK=/run/kocto-clab/started
+
+# ファイルの削除やnameの書き換え後も前回のlabを探せるよう、containerlabが付けるラベルで探す。
+node_ids() {
+	docker ps --quiet --filter "label=clab-topo-file=$TOPOLOGY" "$@"
+}
+
+deployed_labs() {
+	docker ps --all --filter "label=clab-topo-file=$TOPOLOGY" --format '{{.Label "containerlab"}}' | sort -u
+}
+
+topology_name() {
+	sed -n -E "s/^name:[[:space:]]*[\"']?([^\"'#[:space:]]+).*/\1/p" "$TOPOLOGY" | head -n 1
+}
+
+topology_sum() {
+	sha256sum "$TOPOLOGY" 2>/dev/null | cut -d' ' -f1 || true
+}
+
+destroy_lab() {
+	# --cleanupなしでlabディレクトリを残し、同じnameで置き直したときに保存設定を使えるようにする。
+	"$CLAB" destroy --name "$1"
+}
+
+down() {
+	local lab
+	for lab in $(deployed_labs); do
+		destroy_lab "$lab"
+	done
+}
+
+# 古いlabが接続口のNICなどを掴んだままにならないよう、nameが変わったら先に消す。
+destroy_renamed_labs() {
+	local name lab
+	name=$(topology_name)
+	[[ -n $name ]] || return 0
+	for lab in $(deployed_labs); do
+		[[ $lab == "$name" ]] || destroy_lab "$lab"
+	done
+}
+
+# 再起動後はrestart policyで動き出したノードと止まったノードが混ざり、deployは止まったノードを扱えない。
+start_stopped_nodes() {
+	local ids
+	ids=$(node_ids --filter status=exited --filter status=created)
+	[[ -n $ids ]] || return 0
+	echo "Starting nodes left stopped by the reboot"
+	# shellcheck disable=SC2086
+	docker start $ids >/dev/null
+}
+
+up() {
+	local after_boot=0 existing
+	if [[ ! -f $TOPOLOGY ]]; then
+		echo "Topology file not found, destroying labs deployed from it: $TOPOLOGY"
+		down
+		return
+	fi
+	destroy_renamed_labs
+	if [[ ! -e $BOOT_MARK ]]; then
+		after_boot=1
+		start_stopped_nodes
+	fi
+	existing=$(node_ids)
+	# containerlab v0.81のdeployは、deploy済みのlabを作り直さず差分だけを適用する。
+	"$CLAB" deploy --topo "$TOPOLOGY"
+	if [[ $after_boot == 1 && -n $existing ]]; then
+		# deployは動いているノードにリンクを張り直すだけで、exec（IPの付与など）を流さない。
+		# restartはリンクを保ったままノードを起動し直し、execを流し直す。
+		echo "Restarting nodes to re-run their exec commands after boot"
+		"$CLAB" restart --topo "$TOPOLOGY"
+	fi
+	mkdir -p "$(dirname "$BOOT_MARK")"
+	touch "$BOOT_MARK"
+}
+
+# ロックを待つ間の変更通知は取りこぼすため、終わった時点で変わっていればもう一度適用する。
+up_until_stable() {
+	local before
+	while :; do
+		before=$(topology_sum)
+		up
+		[[ $(topology_sum) == "$before" ]] && break
+		echo "Topology changed during deploy, applying it again"
+	done
+}
+
+exec 9>"$LOCK"
+flock 9
+
+case "${1:-}" in
+up) up_until_stable ;;
+down) down ;;
+*)
+	echo "usage: $0 up|down" >&2
+	exit 2
+	;;
+esac

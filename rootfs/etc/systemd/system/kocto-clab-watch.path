@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch containerlab topology in /opt/kocto/lab
+
+[Path]
+# ディレクトリを見るとcontainerlabが作るlabディレクトリにも反応するため、ファイルだけを見る。
+PathChanged=/opt/kocto/lab/topology.clab.yml
+Unit=kocto-clab-reload.service
+
+[Install]
+WantedBy=multi-user.target
