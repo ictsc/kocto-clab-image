@@ -55,7 +55,8 @@ cp -a "$SRC/rootfs" "$stage"
 if [[ $KOCTO_AUTOLOGIN == 1 ]]; then
 	cp -a "$SRC/autologin/." "$stage/"
 fi
-mkdir -p "$stage/opt/bin"
+# gitは空のディレクトリを残さないため、トポロジーの置き場所はここで作る。
+mkdir -p "$stage/opt/bin" "$stage/opt/kocto/lab"
 tar -xzf "$tarball" -C "$stage/opt/bin" containerlab
 # 配布物はclab_admins向けのsetuid付き。rootのserviceからしか使わないので外す。
 chmod 0755 "$stage/opt/bin/containerlab"
